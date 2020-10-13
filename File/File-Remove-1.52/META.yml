@@ -1,0 +1,32 @@
+---
+abstract: 'Remove files and directories'
+author:
+  - 'Adam Kennedy <adamk@cpan.org>'
+build_requires:
+  ExtUtils::MakeMaker: 6.36
+  Test::More: 0.42
+configure_requires:
+  ExtUtils::MakeMaker: 6.36
+distribution_type: module
+dynamic_config: 0
+generated_by: 'Module::Install version 1.06'
+license: perl
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+module_name: File::Remove
+name: File-Remove
+no_index:
+  directory:
+    - inc
+    - t
+    - xt
+requires:
+  Cwd: 3.29
+  File::Spec: 3.29
+  perl: 5.00503
+resources:
+  ChangeLog: http://fisheye2.atlassian.com/changelog/cpan/trunk/File-Remove
+  license: http://dev.perl.org/licenses/
+  repository: http://svn.ali.as/cpan/trunk/File-Remove
+version: 1.52
