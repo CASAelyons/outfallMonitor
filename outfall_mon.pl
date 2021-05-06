@@ -25,7 +25,7 @@ use Geo::JSON;
 
 our $input_data_dir;
 our $outfall_id;
-
+our $field_to_monitor;
 &command_line_parse;
 
 #&daemonize;
@@ -43,8 +43,13 @@ our $event_no = 0;
 our $lat;# = 32.9199;
 our $lon;# = -97.0335;
 our $loc = "Outfall_" . $outfall_id; #059";
-our $outfall_geojson_fn = "./dfwairport_outfalls.geojson";
+our $outfall_geojson_fn = "/home/elyons/perl/dfwairport_outfalls.geojson";
 our $possible_endtime;
+
+our $to = 'elyons19@hotmail.com, elyons@engin.umass.edu';
+our $from = 'noreply@casaalerts.com';
+our $subject = 'CASA automated notification for ' . $loc;
+
 get_outfall_ll($outfall_geojson_fn);
 
 my $file_mon = new threads \&file_monitor;
@@ -97,22 +102,23 @@ sub file_monitor {
 		    print "line: " . $line . "\n";
 		    my @fields = split "," , $line;
 		    #error check
-		    if ($fields[1] < 0) {
+		    if ($fields[$field_to_monitor] < 0) {
 			next;
 		    }
 		    #initial line upon start up
 		    if ($latest_flow == -1) {
-			$latest_flow = $fields[1];
+			$latest_flow = $fields[$field_to_monitor];
 			next;
 		    }
 		    else {
-			my $latest_delta = abs($fields[1]-$latest_flow);
-			$latest_flow = $fields[1];
+			my $latest_delta = abs($fields[$field_to_monitor]-$latest_flow);
+			$latest_flow = $fields[$field_to_monitor];
 			if ($initial_delta == 0) {
 			    if ($latest_delta > .1) {
 				#first time flow was detected
+				print "initial flow detected\n";
 				$initial_delta = 1;
-				push @flowarr, $fields[1];
+				push @flowarr, $fields[$field_to_monitor];
 				my $tmpepoch = timestringToEpoch($fields[0]);
 				my $tmptmstr = epochTo_yyyymmdd_hhMM($tmpepoch);
 				push @timearr, $tmptmstr;
@@ -124,7 +130,7 @@ sub file_monitor {
 			    #flow has already been detected
 			    push @delta_ts, $latest_delta;
 			    push @timestamps, $fields[0];
-			    push @flowarr, $fields[1];
+			    push @flowarr, $fields[$field_to_monitor];
 			    my $tmpepoch = timestringToEpoch($fields[0]);
 			    my $tmptmstr = epochTo_yyyymmdd_hhMM($tmpepoch);
 			    push @timearr, $tmptmstr;
@@ -132,18 +138,31 @@ sub file_monitor {
 			    my $nDelts = scalar @delta_ts;
 			    if ($nDelts > 6) {
 				my $steady = 1;
+				my $num_fluctuations = 0;
 				for (my $t = 0; $t < $nDelts; $t++) {
 				    if ($delta_ts[$t] > .1) {
 					$steady = 0;
+					$num_fluctuations++;
 				    }
 				}
 				if ($steady == 0) {
 				    shift @delta_ts;
 				    shift @timestamps;
-				    $waiting = 0;
-				    $accumulating = 0;
+				    if ($num_fluctuations > 3) {
+					#seems like this is a real event
+					if (($waiting) && (!$accumulating)) {
+					    print "seems like a new event has occurred before the waiting period is up.  Restart\n"; 
+					    $waiting = 0;
+					    @flowarr = ();
+					    @timearr = ();
+					    @timestamps = ();
+					    @delta_ts = ();
+					    $initial_delta = 0;
+					}
+				    }
+					
 				    next;
-				}
+				} 
 				else {
 				    #here marks a possible end of event... now have to wait 72 hours... restarting if there are any new events in the interim
 				    #kill any previously running monitoring loops and start from scratch
@@ -153,10 +172,31 @@ sub file_monitor {
 				    }
 
 				    my $nowepoch = timestringToEpoch($fields[0]);
-				    my $possible_event_epoch = timestringToEpoch($timestamps[0]);
-				    my $waittime = $nowepoch - $possible_event_epoch;
+				    my $possible_event_end_epoch = timestringToEpoch($timestamps[0]);
+				    my $tmpendts = epochTo_yyyymmdd_hhMM($possible_event_end_epoch);
+				    my $endUTC = yyyymmdd_hhMM_ToEpoch($tmpendts);
+				    my $possible_event_start_epoch = yyyymmdd_hhMM_ToEpoch($timearr[0]);
+				    
+				    my $waittime = $nowepoch - $possible_event_end_epoch;
+				    my $event_length = $endUTC - $possible_event_start_epoch;
+				    #print "first time: " . $timearr[0] . "\n";
+				    #print "start?: " . $possible_event_start_epoch . "\n";
+				    #print "end?: " . $possible_event_end_epoch . "\n";
 				    print "wait time: " . $waittime . "\n";
-
+				    #print "event_length: " . $event_length . "\n";
+				    #if the event hardly lasted any time at all, it was probably bad data
+				    #cancel it and move on
+				    if ($event_length < 3600) {
+					print "false alarm we think.  Starting over\n";
+					$initial_delta = 0;
+					@flowarr = ();
+					@timearr = ();
+					@timestamps = ();
+					@delta_ts = ();
+					$waiting = 0;
+					next;
+				    }
+				    
 				    if ($waittime < 259200) {
 					#if less than 72 hours, continue
 					next;
@@ -167,9 +207,9 @@ sub file_monitor {
 					$waiting = 0;
 					$accumulating = 1;
 				    
-					for (my $t = 0; $t < $nDelts; $t++) {
-					    print $timestamps[$t] . " delta: " . $delta_ts[$t] . "\n";
-					}
+					#for (my $t = 0; $t < $nDelts; $t++) {
+					#    print $timestamps[$t] . " delta: " . $delta_ts[$t] . "\n";
+					#}
 				    
 					#get precip
 					my $threshold = .1;
@@ -186,12 +226,36 @@ sub file_monitor {
 					print "endEpoch " . $endEpoch . "\n";
 					
 					my $init_str = epochTo_yyyymmdd_hhMM($startEpoch);
-					my $start_str = $init_str;
 					my $end_str = epochTo_yyyymmdd_hhMM($endEpoch);
-					$start_str = $end_str;
+					
+					my $nowEpoch = time();
+					print "nowEpoch " . $nowEpoch . "\n";
+					my $now_str = epochTo_yyyymmdd_hhMM($nowEpoch);
+
+				        my $initendp = "https://droc2.srh.noaa.gov/cgi-bin/precip_query.pl?start=" . $end_str . "&end=" .
+					    $now_str . "&lat=" . $lat . "&lon=" . $lon . "&loc=" . $loc;
+					print "initial query: " . $initendp . "\n";
+					
+					my $start_str = $now_str;
+					$endEpoch = $nowEpoch;
+
+					my $init_message = "The 72hr waiting period following a flow event at " . $loc . " has ended.  Starting accumulations.";
+					send_email($from, $to, $subject, $init_message);
+					#because the data may show up sporadically, the accumulation initiation could start in the past
+					#therefore lets accumulate to the present before we start going minute by minute
 					print "sleeping for 10 minutes to let the QPE catch up\n";
 					sleep 600;
 					print "done sleeping... QPE should be caught up.  Now we accumulate...\n";
+					print "Getting any accumulations that occurred between the end of the 72 hr waiting period and now\n";
+					$runningTotal += getQPE($initendp);
+					push @totarr, $runningTotal;
+					push @accumtimearr, $end_str;
+					print "Total in the interim: " . $runningTotal . "\n";
+					if ($runningTotal >= $threshold) {
+					    print "Exceeded our threshold in the interim.\n";
+					    $accumulating = 0;
+					}
+					    
 					while($accumulating == 1){
 					    if ($runningTotal < $threshold) {
 						print "threshold: " . $threshold . " rt: " . $runningTotal . "\n";
@@ -250,7 +314,7 @@ sub file_monitor {
 					$graph->set_y_label_font('/fonts/arial.ttf', 26);
 					$graph->set_text_clr(black);
 					my $gd = $graph->plot(\@master) or die $graph->error;
-					open(IMG, '>/home/ldm/perl/flow_event_' . $event_no . '.png') or die $!;
+					open(IMG, '>/home/elyons/perl/flow_event_' . $event_no . '.png') or die $!;
 					binmode IMG;
 					print IMG $gd->png;
 					
@@ -302,31 +366,25 @@ sub file_monitor {
 					$accumgraph->set_y_label_font('/fonts/arial.ttf', 26);
 					$accumgraph->set_text_clr(black);
 					my $accumgd = $accumgraph->plot(\@accummaster) or die $accumgraph->error;
-					open(ACCUMIMG, '>/home/ldm/perl/qpe_event_' . $event_no . '.png') or die $!;
+					open(ACCUMIMG, '>/home/elyons/perl/qpe_event_' . $event_no . '.png') or die $!;
 					binmode ACCUMIMG;
 					print ACCUMIMG $accumgd->png;
 					
 					#send email
 					#my $to = 'elyons19@hotmail.com, elyons@engin.umass.edu, chughes@dfwairport.com, stan1@dfwairport.com, aackel1@dfwairport.com, alexisackel@gmail.com, samgotan@gmail.com';
-					my $to = 'elyons19@hotmail.com, elyons@engin.umass.edu'; 
-					my $from = 'noreply@casaalerts.com';
-					my $subject = 'CASA automated notification for ' . $loc;
+
 					my $message = 'Following the flow event at ' . $loc . ' CASA has detected rainfall exceeding ' . $threshold . 'inches';
-					
-					my $eml = MIME::Lite->new ( From => $from, To => $to, Subject => $subject, Type => 'multipart/mixed');
-					$eml->attach(Type => 'text', Data => $message);
-					$eml->attach(Type => 'image/png', Path => '/home/ldm/perl/flow_event_' . $event_no . '.png', 
-						     Filename => 'flow_event_' . $event_no . '.png', Disposition => 'attachment' );
-					$eml->attach(Type => 'image/png', Path => '/home/ldm/perl/qpe_event_' . $event_no . '.png',
-						     Filename => 'qpe_event_' . $event_no . '.png', Disposition => 'attachment' );
-					$eml->send;
+					send_email($from, $to, $subject, $message, $event_no);
 					
 					$event_no++;
 				    
 					#reset variables
 					@flowarr = ();
 					@timearr = ();
+					@timestamps = ();
+					@delta_ts = ();
 					$initial_delta = 0;
+					$waiting = 0;
 				    }
 				}
 			    }
@@ -355,26 +413,32 @@ sub daemonize {
 }
 
 sub command_line_parse {
-    if (($#ARGV < 0) || ($#ARGV > 1)) {
-	print "Usage:  outfall_mon.pl input_dir outfall_id\n";
+    if (($#ARGV < 0) || ($#ARGV > 2)) {
+	print "Usage:  outfall_mon.pl input_dir outfall_id field_to_monitor (1 or 2) \n";
 	exit;
     }
     $input_data_dir = $ARGV[0];
     $outfall_id = $ARGV[1];
+    $field_to_monitor = $ARGV[2];
+    if (($field_to_monitor != 1) && ($field_to_monitor != 2)) {
+	print "bad field.  Using flow, ie. 1 \n";
+	$field_to_monitor = 1;
+    }
     my @rdd = split(/ /, $input_data_dir);
     foreach $w (@rdd) {
 	print "Will recursively monitor $w for incoming csv files\n";
     }
 }
 
-sub yyyymmdd_hhMMss_ToEpoch {
+sub yyyymmdd_hhMM_ToEpoch {
     my $datestr = $_[0];
-    my $yr = substr($datestr,1,4);
-    my $mo = substr($datestr,6,2);
-    my $dy = substr($datestr,9,2);
-    my $hr = substr($datestr,12,2);
-    my $mn = substr($datestr,15,2);
-    my $ss = substr($datestr,18,2);
+    my $yr = substr($datestr,0,4);
+    my $mo = substr($datestr,4,2);
+    my $dy = substr($datestr,6,2);
+    my $hr = substr($datestr,9,2);
+    my $mn = substr($datestr,11,2);
+    my $ss = "00";
+    #my $ss = substr($datestr,18,2);
     #print $yr . $mo . $dy . "-" . $hr . $mn . $ss . "\n";
     
     my $datedt = DateTime->new(year => $yr, month => $mo, day => $dy, hour => $hr, minute => $mn, second => $ss, nanosecond => 0, time_zone  => 'America/Chicago');
@@ -449,4 +513,18 @@ sub get_outfall_ll {
 	}
     }
     print "lat: " . $lat . " lon: " . $lon . "\n";
+}
+
+sub send_email {
+    my ( $email_from, $email_to, $email_subject, $email_message, $event_no ) = @_;
+    
+    my $eml = MIME::Lite->new ( From => $email_from, To => $email_to, Subject => $email_subject, Type => 'multipart/mixed');
+    $eml->attach(Type => 'text', Data => $email_message);
+    if (defined $event_no) {
+	$eml->attach(Type => 'image/png', Path => '/home/elyons/perl/flow_event_' . $event_no . '.png',
+		     Filename => 'flow_event_' . $event_no . '.png', Disposition => 'attachment' );
+	$eml->attach(Type => 'image/png', Path => '/home/elyons/perl/qpe_event_' . $event_no . '.png',
+		     Filename => 'qpe_event_' . $event_no . '.png', Disposition => 'attachment' );
+    }
+    $eml->send;
 }
