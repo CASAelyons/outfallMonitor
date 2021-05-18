@@ -301,9 +301,10 @@ sub file_monitor {
 					$sth = $dbh->prepare("SELECT EventId from outfalls WHERE Id = '${outfall_id}';");
 					$rv = $sth->execute
 					    or warn $sth->errstr;
+					my $eventid = $sth->fetchrow();
 					$sth->finish;
 					
-					$sth = $dbh->prepare("UPDATE events SET BaseFlow='${bflow}' WHERE EventId = '${rv}';");
+					$sth = $dbh->prepare("UPDATE events SET BaseFlow='${bflow}' WHERE EventId = '${eventid}';");
 					$rv = $sth->execute
 					    or warn $sth->errstr;
 					$sth->finish;
@@ -541,6 +542,30 @@ sub file_monitor {
 					$initial_delta = 0;
 					$waiting = 0;
 					$event_created = 0;
+					my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
+					    or die $DBI::errstr;
+					$sth = $dbh->prepare("UPDATE outfalls SET AccumulatingRainfall='false' WHERE Id = '${outfall_id}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+
+					$sth = $dbh->prepare("SELECT EventId from outfalls WHERE Id = '${outfall_id}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					my $eventid = $sth->fetchrow();
+					$sth->finish;
+					
+					$sth = $dbh->prepare("UPDATE events SET eventsampled='true' WHERE eventId = '${eventid}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+
+					$sth = $dbh->prepare("UPDATE outfalls SET eventid=null WHERE Id = '${outfall_id}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+
+					$dbh->disconnect;
 				    }
 				}
 			    }
