@@ -222,19 +222,29 @@ sub file_monitor {
 					    my $rv = $sth->execute
 						or warn $sth->errstr;
 					    $sth->finish;
+
+					    $sth = $dbh->prepare("SELECT EventId from outfalls WHERE Id = '${outfall_id}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    my $eventid = $sth->fetchrow();
+					    $sth->finish;
+
+					    $sth = $dbh->prepare("UPDATE events SET eventsampled='false' WHERE eventId = '${eventid}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
 					    
 					    $sth = $dbh->prepare("UPDATE outfalls SET EventId=null WHERE Id = '${outfall_id}';");
 					    $rv = $sth->execute
 						or warn $sth->errstr;
 					    $sth->finish;
 					    
-					    #set waiting72hrs and accumulatingrainfall to false... we're starting from the beginning here
 					    $sth = $dbh->prepare("UPDATE outfalls SET Waiting72hrs='false' WHERE Id = '${outfall_id}';");
 					    $rv = $sth->execute
 						or warn $sth->errstr;
 					    $sth->finish;
 					    
-					    $sth = $dbh->prepare("UPDATE outfalls SET AccumulatingRainfall=null WHERE Id = '${outfall_id}';");
+					    $sth = $dbh->prepare("UPDATE outfalls SET AccumulatingRainfall='false' WHERE Id = '${outfall_id}';");
 					    $rv = $sth->execute
 						or warn $sth->errstr;
 					    $sth->finish;
@@ -370,7 +380,7 @@ sub file_monitor {
 					    or warn $sth->errstr;
 					$sth->finish;
 
-					$sth = $dbh->prepare("UPDATE outfalls SET AccumulatingRainfall=null WHERE Id = '${outfall_id}';");
+					$sth = $dbh->prepare("UPDATE outfalls SET AccumulatingRainfall='false' WHERE Id = '${outfall_id}';");
 					$rv = $sth->execute
 					    or warn $sth->errstr;
 					$sth->finish;
