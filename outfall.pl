@@ -31,11 +31,11 @@ print $cgi->table({-border=>1}), $cgi->Tr ( $cgi->th( $sth->{NAME}->[0]) . $cgi-
 		  
 while (my @row = $sth->fetchrow_array) {
     my $prodtype;
-    if ($row[3] == 1) {
-	$prodtype = "water level";
+    if ($row[2] == 1) {
+	$prodtype = "streamflow";
     }
     else {
-	$prodtype = "streamflow";
+	$prodtype = "water level";
     }
     
     my $abvbaseflow_img;
@@ -84,14 +84,16 @@ print $cgi->table({-border=>1}), $cgi->Tr ( $cgi->th( $sth->{NAME}->[0]) . $cgi-
 while (my @row = $sth->fetchrow_array) {
     my $prodtype;
     if ($row[9] == 1) {
-	$prodtype = "water level";
+	$prodtype = "streamflow";
     }
     else {
-	$prodtype = "streamflow";
+	$prodtype = "water level";
     }
     
     print $cgi->Tr( $cgi->td( $cgi->center($row[0]) ) . $cgi->td( $cgi->center($row[1] )) . $cgi->td( $cgi->center($row[2] )) . $cgi->td ( $cgi->center($row[3])) . $cgi->td ( $cgi->center($row[4])) . $cgi->td ( $cgi->center($row[5])) . $cgi->td( $cgi->center($row[6])) . $cgi->td( $cgi->center($row[7])) . $cgi->td( $cgi->center($row[8])) . $cgi->td( $cgi->center($prodtype)));
 }
+
+$sth->finish;
 $dbh->disconnect;
 
 print "</body></html>\n";
