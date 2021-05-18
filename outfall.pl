@@ -27,7 +27,7 @@ $sth->execute;
 
 #print "<tr><th>$sth->{NAME}->[0]</th><th>$sth->{NAME}->[1]</th><th>$sth->{NAME}->[2]</th><th>$sth->{NAME}->[3]</th><th>$sth->{NAME}->[4]</th><th>$sth->{NAME}->[5]</th><th>$sth->{NAME}->[6]</th><th>$sth->{NAME}->[7]</th></tr>";
 
-print $cgi->table({-border=>1}), $cgi->Tr ( $cgi->th( $sth->{NAME}->[0]) . $cgi->th($sth->{NAME}->[1]) . $cgi->th($sth->{NAME}->[2]) . $cgi->th($sth->{NAME}->[3]) . $cgi->th($sth->{NAME}->[4]) . $cgi->th($sth->{NAME}->[5]) . $cgi->th($sth->{NAME}->[6]));
+print $cgi->table({-border=>1}), $cgi->Tr ( $cgi->th( $sth->{NAME}->[0]) . $cgi->th($sth->{NAME}->[7]) . $cgi->th($sth->{NAME}->[2]) . $cgi->th($sth->{NAME}->[1]) . $cgi->th($sth->{NAME}->[3]) . $cgi->th($sth->{NAME}->[4]) . $cgi->th($sth->{NAME}->[5]) . $cgi->th($sth->{NAME}->[6]));
 		  
 while (my @row = $sth->fetchrow_array) {
     my $prodtype;
@@ -70,7 +70,7 @@ while (my @row = $sth->fetchrow_array) {
 	$accumulating_img = $cgi->center($cgi->img({ -src => "http://emmy10.casa.umass.edu/images/on.png" }));
     }
     
-    print $cgi->Tr( $cgi->td( $row[0] ) . $cgi->td( $cgi->center($row[1] )) . $cgi->td( $prodtype ) . $cgi->td ( $abvbaseflow_img ) . $cgi->td ( $waiting_img ) . $cgi->td ( $accumulating_img ) . $cgi->td( $cgi->center($row[6]) ));
+    print $cgi->Tr( $cgi->td( $row[0] ) . $cgi->td( $cgi->center($row[7] )) . $cgi->td( $prodtype ) . $cgi->td( $cgi->center($row[1] )) . $cgi->td ( $abvbaseflow_img ) . $cgi->td ( $waiting_img ) . $cgi->td ( $accumulating_img ) . $cgi->td( $cgi->center($row[6]) ));
 };
 
 $sth->finish;
