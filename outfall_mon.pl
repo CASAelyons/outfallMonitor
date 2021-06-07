@@ -763,7 +763,7 @@ sub command_line_parse {
     $input_data_dir = $ARGV[0];
     $outfall_id = $ARGV[1];
     $field_to_monitor = $ARGV[2];
-    my $data_format = $ARGV[3];
+    $data_format = $ARGV[3];
     if (($data_format != 0) && ($data_format != 1)) {
 	print "bad dataformat.  Assuming sharepoint ie. 0 \n";
 	$data_format = 0;
