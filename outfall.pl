@@ -34,40 +34,43 @@ while (my @row = $sth->fetchrow_array) {
     if ($row[2] == 1) {
 	$prodtype = "streamflow";
     }
+    elsif ($row[2] == 2) {
+	$prodtype = "velocity";
+    }
     else {
 	$prodtype = "water level";
     }
     
     my $abvbaseflow_img;
     if (( $row[3] // '' ) eq '' ) {
-	$abvbaseflow_img = $cgi->center($cgi->img({ -src => "http://emmy10.casa.umass.edu/images/off.png" }));
+	$abvbaseflow_img = $cgi->center($cgi->img({ -src => "https://emmy10.casa.umass.edu/images/off.png" }));
     }
     elsif ($row[3] == 0) {
-	$abvbaseflow_img = $cgi->center($cgi->img({ -src => "http://emmy10.casa.umass.edu/images/off.png" }));
+	$abvbaseflow_img = $cgi->center($cgi->img({ -src => "https://emmy10.casa.umass.edu/images/off.png" }));
     }
     else {
-	$abvbaseflow_img = $cgi->center($cgi->img({ -src => "http://emmy10.casa.umass.edu/images/on.png" }));
+	$abvbaseflow_img = $cgi->center($cgi->img({ -src => "https://emmy10.casa.umass.edu/images/on.png" }));
     }
     my $waiting_img;
     if (( $row[4] // '' ) eq '' ) {
-	$waiting_img = $cgi->center($cgi->img({ -src => "http://emmy10.casa.umass.edu/images/off.png" }));
+	$waiting_img = $cgi->center($cgi->img({ -src => "https://emmy10.casa.umass.edu/images/off.png" }));
     }
     elsif ($row[4] == 0) {
-	$waiting_img = $cgi->center($cgi->img({ -src => "http://emmy10.casa.umass.edu/images/off.png" }));
+	$waiting_img = $cgi->center($cgi->img({ -src => "https://emmy10.casa.umass.edu/images/off.png" }));
     }
     else {
-	$waiting_img = $cgi->center($cgi->img({ -src => "http://emmy10.casa.umass.edu/images/on.png" }));
+	$waiting_img = $cgi->center($cgi->img({ -src => "https://emmy10.casa.umass.edu/images/on.png" }));
     }
 		
     my $accumulating_img;
     if (( $row[5] // '' ) eq '' ) {
-	$accumulating_img = $cgi->center($cgi->img({ -src => "http://emmy10.casa.umass.edu/images/off.png" }));
+	$accumulating_img = $cgi->center($cgi->img({ -src => "https://emmy10.casa.umass.edu/images/off.png" }));
     }
     elsif ($row[5] == 0) {
-	$accumulating_img = $cgi->center($cgi->img({ -src => "http://emmy10.casa.umass.edu/images/off.png" }));
+	$accumulating_img = $cgi->center($cgi->img({ -src => "https://emmy10.casa.umass.edu/images/off.png" }));
     }
     else {
-	$accumulating_img = $cgi->center($cgi->img({ -src => "http://emmy10.casa.umass.edu/images/on.png" }));
+	$accumulating_img = $cgi->center($cgi->img({ -src => "https://emmy10.casa.umass.edu/images/on.png" }));
     }
     
     print $cgi->Tr( $cgi->td( $row[0] ) . $cgi->td( $cgi->center($row[7] )) . $cgi->td( $prodtype ) . $cgi->td( $cgi->center($row[1] )) . $cgi->td ( $abvbaseflow_img ) . $cgi->td ( $waiting_img ) . $cgi->td ( $accumulating_img ) . $cgi->td( $cgi->center($row[6]) ));
@@ -83,14 +86,14 @@ print $cgi->table({-border=>1}), $cgi->Tr ( $cgi->th( $sth->{NAME}->[0]) . $cgi-
 
 while (my @row = $sth->fetchrow_array) {
     my $prodtype;
-    if ($row[9] == 1) {
+    if ($row[8] == 1) {
 	$prodtype = "streamflow";
     }
     else {
 	$prodtype = "water level";
     }
     
-    print $cgi->Tr( $cgi->td( $cgi->center($row[0]) ) . $cgi->td( $cgi->center($row[1] )) . $cgi->td( $cgi->center($row[2] )) . $cgi->td ( $cgi->center($row[3])) . $cgi->td ( $cgi->center($row[4])) . $cgi->td ( $cgi->center($row[5])) . $cgi->td( $cgi->center($row[6])) . $cgi->td( $cgi->center($row[7])) . $cgi->td( $cgi->center($row[8])) . $cgi->td( $cgi->center($prodtype)));
+    print $cgi->Tr( $cgi->td( $cgi->center($row[0]) ) . $cgi->td( $cgi->center($row[1] )) . $cgi->td( $cgi->center($row[2] )) . $cgi->td ( $cgi->center($row[3])) . $cgi->td ( $cgi->center($row[4])) . $cgi->td ( $cgi->center($row[5])) . $cgi->td( $cgi->center($row[6])) . $cgi->td( $cgi->center($row[7])) . $cgi->td( $cgi->center($prodtype)) . $cgi->td( $cgi->center($row[9])));
 }
 
 $sth->finish;

@@ -18,7 +18,15 @@ use threads::shared;
 use DateTime;
 use GD::Graph;
 use GD::Graph::lines;
+use DBI;
+use JSON;
+use DateTime;
+use DateTime qw(from_epoch);
 use List::Util qw( min max );
+use Scalar::Util qw(looks_like_number);
+use Digest::SHA qw(hmac_sha256_hex);
+use Encode qw(encode);
+use REST::Client;
 use WWW::Curl::Easy;
 use MIME::Lite;
 use Geo::JSON;
@@ -26,9 +34,10 @@ use Geo::JSON;
 our $input_data_dir;
 our $outfall_id;
 our $field_to_monitor;
+our $data_format;
 &command_line_parse;
 
-#&daemonize;
+&daemonize;
 
 our @delta_ts;
 our $latest_flow = -1;
@@ -38,13 +47,72 @@ our $waiting = 0;
 our $initial_delta = 0;
 our @flowarr;
 our @timearr;
+our @permitvals;
+our @permittimes;
+our $event_created = 0;
 our $event_no = 0;
+our $gauge_online; #the permitted rain gauge
 
 our $lat;# = 32.9199;
 our $lon;# = -97.0335;
 our $loc = "Outfall_" . $outfall_id; #059";
 our $outfall_geojson_fn = "/home/elyons/perl/dfwairport_outfalls.geojson";
 our $possible_endtime;
+
+our $db_host = 'localhost';
+our $db_user = 'dfw';
+our $db_pass = 'outfall';
+our $db_name = 'dfwairport';
+our $db = "dbi:Pg:dbname=${db_name};host=${db_host}";
+my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
+    or die $DBI::errstr;
+print "connected to db!\n";
+
+#update database with field being monitored
+print $field_to_monitor . " " . $outfall_id . "\n";
+my $sth = $dbh->prepare("UPDATE outfalls SET ProductType='${field_to_monitor}' WHERE Id = '${outfall_id}';");
+my $rv = $sth->execute
+    or warn $sth->errstr;
+$sth->finish;
+
+#set abovebaseflow and eventid to null because we don't know if we're above or in an event upon startup 
+$sth = $dbh->prepare("UPDATE outfalls SET AboveBaseFlow=null WHERE Id = '${outfall_id}';");
+$rv = $sth->execute
+    or warn $sth->errstr;
+$sth->finish;
+
+$sth = $dbh->prepare("SELECT EventId from outfalls WHERE Id = '${outfall_id}';");
+$rv = $sth->execute
+    or warn $sth->errstr;
+my $eventid = $sth->fetchrow();
+$sth->finish;
+
+if ( defined $eventid) {
+    my $unknownstr = "outcome unknown: monitoring code restarted";
+    $sth = $dbh->prepare("UPDATE events SET outcome = ? WHERE eventId = '${eventid}';");
+    $sth->bind_param(1, $unknownstr);
+    $rv = $sth->execute
+	or warn $sth->errstr;
+    $sth->finish;
+}
+
+$sth = $dbh->prepare("UPDATE outfalls SET EventId=null WHERE Id = '${outfall_id}';");
+$rv = $sth->execute
+    or warn $sth->errstr;
+$sth->finish;
+
+#set waiting72hrs and accumulatingrainfall to false... we're starting from the beginning here
+$sth = $dbh->prepare("UPDATE outfalls SET Waiting72hrs='false' WHERE Id = '${outfall_id}';");
+$rv = $sth->execute
+    or warn $sth->errstr;
+$sth->finish;
+
+$sth = $dbh->prepare("UPDATE outfalls SET AccumulatingRainfall=null WHERE Id = '${outfall_id}';");
+$rv = $sth->execute
+    or warn $sth->errstr;
+$sth->finish;
+
+$dbh->disconnect;
 
 our $to = 'elyons19@hotmail.com, elyons@engin.umass.edu';
 our $from = 'noreply@casaalerts.com';
@@ -97,10 +165,27 @@ sub file_monitor {
 
 		print "opening Outfall \n";
 		open(my $data, '<', $file) or die "Could not open '$file' $!\n";
-		    
+		if ($data_format == 1) {
+		    my @datalines = split(/\n/, $data);
+		    shift @datalines;
+		    shift @datalines;
+		    shift@datalines;
+		    $data = join "\n", @datalines;
+		}
 		while (my $line = <$data>) {
 		    print "line: " . $line . "\n";
 		    my @fields = split "," , $line;
+		    my $tstamptz = timestringToTimestampTZ($fields[0]);
+
+		    my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
+			or die $DBI::errstr;
+
+		    my $sth = $dbh->prepare("UPDATE outfalls SET lastData='${tstamptz}' WHERE Id = '${outfall_id}';");
+		    my $rv = $sth->execute
+			or warn $sth->errstr;
+		    $sth->finish;
+		    $dbh->disconnect;
+			    
 		    #error check
 		    if ($fields[$field_to_monitor] < 0) {
 			next;
@@ -117,11 +202,20 @@ sub file_monitor {
 			    if ($latest_delta > .1) {
 				#first time flow was detected
 				print "initial flow detected\n";
+				#update database
+				my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
+				    or die $DBI::errstr;
+				my $sth = $dbh->prepare("UPDATE outfalls SET AboveBaseFlow='true' WHERE Id = '${outfall_id}';");
+				my $rv = $sth->execute
+				    or warn $sth->errstr;
+				$sth->finish;
+				$dbh->disconnect;
 				$initial_delta = 1;
 				push @flowarr, $fields[$field_to_monitor];
 				my $tmpepoch = timestringToEpoch($fields[0]);
 				my $tmptmstr = epochTo_yyyymmdd_hhMM($tmpepoch);
-				push @timearr, $tmptmstr;
+				push @timearr, $fields[0];
+				
 				#print @flowarr[0] . "\n";
 			    }
 			    next;
@@ -133,7 +227,7 @@ sub file_monitor {
 			    push @flowarr, $fields[$field_to_monitor];
 			    my $tmpepoch = timestringToEpoch($fields[0]);
 			    my $tmptmstr = epochTo_yyyymmdd_hhMM($tmpepoch);
-			    push @timearr, $tmptmstr;
+			    push @timearr, $fields[0];
 			    
 			    my $nDelts = scalar @delta_ts;
 			    if ($nDelts > 6) {
@@ -148,14 +242,56 @@ sub file_monitor {
 				if ($steady == 0) {
 				    shift @delta_ts;
 				    shift @timestamps;
-				    if ($num_fluctuations > 3) {
-					#seems like this is a real event
+				    if ($num_fluctuations > 3) {					
 					if (($waiting) && (!$accumulating)) {
 					    print "seems like a new event has occurred before the waiting period is up.  Restart\n"; 
+
+					    my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
+						or die $DBI::errstr;
+
+					    #set abovebaseflow and eventid to null for now... we may well be above base flow but we're starting over
+					    my $sth = $dbh->prepare("UPDATE outfalls SET AboveBaseFlow=null WHERE Id = '${outfall_id}';");
+					    my $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+
+					    $sth = $dbh->prepare("SELECT EventId from outfalls WHERE Id = '${outfall_id}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    my $eventid = $sth->fetchrow();
+					    $sth->finish;
+
+					    my $rainstr = "rain during waiting period";
+					    $sth = $dbh->prepare("UPDATE events SET outcome = ? WHERE eventId = '${eventid}';");
+					    $sth->bind_param(1, $rainstr);
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+					    
+					    $sth = $dbh->prepare("UPDATE outfalls SET EventId=null WHERE Id = '${outfall_id}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+					    
+					    $sth = $dbh->prepare("UPDATE outfalls SET Waiting72hrs='false' WHERE Id = '${outfall_id}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+					    
+					    $sth = $dbh->prepare("UPDATE outfalls SET AccumulatingRainfall='false' WHERE Id = '${outfall_id}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+					    
+					    $dbh->disconnect;
+					    
 					    $waiting = 0;
+					    $event_created = 0;
 					    @flowarr = ();
 					    @timearr = ();
 					    @timestamps = ();
+					    @permitvals = ();
+					    @permittimes = ();
 					    @delta_ts = ();
 					    $initial_delta = 0;
 					}
@@ -168,6 +304,74 @@ sub file_monitor {
 				    #kill any previously running monitoring loops and start from scratch
 				    if ($waiting == 0) {
 					print "possible end of alertable event... waiting 72 hours\n";
+					if ($event_created == 0) {
+					    my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
+						or die $DBI::errstr;
+					    
+					    my $sth = $dbh->prepare("INSERT into events(outfallid) VALUES(${outfall_id});");
+					    my $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+					    
+					    $sth = $dbh->prepare("SELECT EventId FROM events WHERE outfallid = '${outfall_id}' ORDER BY EventId DESC NULLS LAST;");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    my $eventid = $sth->fetchrow();
+					    $sth->finish;
+
+					    my $ongoingstr = "ongoing";
+					    $sth = $dbh->prepare("UPDATE events SET outcome = ? WHERE EventId = '${eventid}';");
+					    $sth->bind_param(1,$ongoingstr);
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+						
+					    $sth = $dbh->prepare("UPDATE outfalls SET EventId='${eventid}' WHERE Id = '${outfall_id}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+
+					    $sth = $dbh->prepare("UPDATE outfalls SET Waiting72hrs='true' WHERE Id = '${outfall_id}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+					
+					    $sth = $dbh->prepare("UPDATE outfalls SET AboveBaseFlow='false' WHERE Id = '${outfall_id}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+					
+					    my $bflow;
+					    if ($flowarr[-1] eq "\"NAN\"") {
+						$bflow = 0;
+					    }
+					    else {
+						$bflow = $flowarr[-1];
+					    }
+					    $sth = $dbh->prepare("UPDATE outfalls SET BaseFlow='${bflow}' WHERE Id = '${outfall_id}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+					    
+					    $sth = $dbh->prepare("UPDATE events SET BaseFlow='${bflow}' WHERE EventId = '${eventid}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+
+					    my $starttstamptz = timestringToTimestampTZ($timearr[0]);
+					    $sth = $dbh->prepare("UPDATE events SET FlowStartTime='${starttstamptz}' WHERE EventId = '${eventid}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+
+					    my $endtstamptz = timestringToTimestampTZ($fields[0]);
+					    $sth = $dbh->prepare("UPDATE events SET FlowEndTime='${endtstamptz}' WHERE EventId = '${eventid}';");
+					    $rv = $sth->execute
+						or warn $sth->errstr;
+					    $sth->finish;
+					    
+					    $dbh->disconnect;
+					}
 					$waiting = 1;
 				    }
 
@@ -175,7 +379,7 @@ sub file_monitor {
 				    my $possible_event_end_epoch = timestringToEpoch($timestamps[0]);
 				    my $tmpendts = epochTo_yyyymmdd_hhMM($possible_event_end_epoch);
 				    my $endUTC = yyyymmdd_hhMM_ToEpoch($tmpendts);
-				    my $possible_event_start_epoch = yyyymmdd_hhMM_ToEpoch($timearr[0]);
+				    my $possible_event_start_epoch = timestringToEpoch($timearr[0]);
 				    
 				    my $waittime = $nowepoch - $possible_event_end_epoch;
 				    my $event_length = $endUTC - $possible_event_start_epoch;
@@ -186,14 +390,58 @@ sub file_monitor {
 				    #print "event_length: " . $event_length . "\n";
 				    #if the event hardly lasted any time at all, it was probably bad data
 				    #cancel it and move on
-				    if ($event_length < 3600) {
+				    
+				    if (($event_length < 2000) || ($num_fluctuations < 5)) {
 					print "false alarm we think.  Starting over\n";
+					my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
+					    or die $DBI::errstr;
+
+					#end existing events and go back to default
+					my $sth = $dbh->prepare("UPDATE outfalls SET AboveBaseFlow=null WHERE Id = '${outfall_id}';");
+					my $rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+
+					$sth = $dbh->prepare("SELECT EventId from outfalls WHERE Id = '${outfall_id}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					my $eventid = $sth->fetchrow();
+					$sth->finish;
+
+					my $fa = "false alarm";
+					$sth = $dbh->prepare("UPDATE events SET outcome = ? WHERE eventId = '${eventid}';");
+					$sth->bind_param(1,$fa);
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+					
+					$sth = $dbh->prepare("UPDATE outfalls SET EventId=null WHERE Id = '${outfall_id}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+
+					$sth = $dbh->prepare("UPDATE outfalls SET Waiting72hrs='false' WHERE Id = '${outfall_id}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+
+					$sth = $dbh->prepare("UPDATE outfalls SET AccumulatingRainfall='false' WHERE Id = '${outfall_id}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+
+					$dbh->disconnect;
+					
 					$initial_delta = 0;
 					@flowarr = ();
 					@timearr = ();
 					@timestamps = ();
+					@permitvals = ();
+					@permittimes = ();
 					@delta_ts = ();
 					$waiting = 0;
+					$event_created = 0;
+					
 					next;
 				    }
 				    
@@ -204,6 +452,31 @@ sub file_monitor {
 				    else {
 					print "72 hours reached!\n";
 					print "Now: $fields[0] and event end time: $timestamps[0]\n";
+					my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
+					    or die $DBI::errstr;
+					my $sth = $dbh->prepare("UPDATE outfalls SET Waiting72hrs='false' WHERE Id = '${outfall_id}';");
+					my $rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+					
+					$sth = $dbh->prepare("UPDATE outfalls SET AccumulatingRainfall='true' WHERE Id = '${outfall_id}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+
+					$sth = $dbh->prepare("SELECT EventId from outfalls WHERE Id = '${outfall_id}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					my $eventid = $sth->fetchrow();
+					$sth->finish;
+
+					my $inittstamptz = timestringToTimestampTZ($fields[0]);
+					$sth = $dbh->prepare("UPDATE events SET AccumulateStartTime='${inittstamptz}' WHERE EventId = '${eventid}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+					
+					$dbh->disconnect;
 					$waiting = 0;
 					$accumulating = 1;
 				    
@@ -213,11 +486,13 @@ sub file_monitor {
 				    
 					#get precip
 					my $threshold = .1;
-					my $runningTotal = 0; 
+					my $runningTotal = 0;
+					my $runningGaugeTotal = 0;
 					my @totarr;
+					my @gaugetotarr;
 					my @accumtimearr;
 					push @totarr, 0;
-					
+					push @gaugetotarr, 0;
 				    
 					my $startEpoch = timestringToEpoch($timestamps[0]);
 					print "startEpoch " . $startEpoch . "\n";
@@ -235,10 +510,7 @@ sub file_monitor {
 				        my $initendp = "https://droc2.srh.noaa.gov/cgi-bin/precip_query.pl?start=" . $end_str . "&end=" .
 					    $now_str . "&lat=" . $lat . "&lon=" . $lon . "&loc=" . $loc;
 					print "initial query: " . $initendp . "\n";
-					
-					my $start_str = $now_str;
-					$endEpoch = $nowEpoch;
-
+				
 					my $init_message = "The 72hr waiting period following a flow event at " . $loc . " has ended.  Starting accumulations.";
 					send_email($from, $to, $subject, $init_message);
 					#because the data may show up sporadically, the accumulation initiation could start in the past
@@ -248,18 +520,49 @@ sub file_monitor {
 					print "done sleeping... QPE should be caught up.  Now we accumulate...\n";
 					print "Getting any accumulations that occurred between the end of the 72 hr waiting period and now\n";
 					$runningTotal += getQPE($initendp);
+					$runningGaugeTotal += get_permit_data($endEpoch, $nowEpoch);
+					
 					push @totarr, $runningTotal;
 					push @accumtimearr, $end_str;
-					print "Total in the interim: " . $runningTotal . "\n";
-					if ($runningTotal >= $threshold) {
+					push @gaugetotarr, $runningGaugeTotal;
+					
+					print "QPE Total in the interim: " . $runningTotal . "\n";
+					print "Gauge Total in the interim: " . $runningGaugeTotal . "\n";
+					
+					if ($runningGaugeTotal >= $threshold) {
+					    #use the gauge as notification trigger
 					    print "Exceeded our threshold in the interim.\n";
 					    $accumulating = 0;
 					}
-					    
+
+					my $start_str = $now_str;
+					$startEpoch = $endEpoch;
+					$endEpoch = $nowEpoch;
+					my $qpeComplete = 0;
 					while($accumulating == 1){
-					    if ($runningTotal < $threshold) {
-						print "threshold: " . $threshold . " rt: " . $runningTotal . "\n";
-						$endEpoch += 60;
+					    if (($runningTotal > $threshold) && ($qpeComplete == 0)) {
+						#for now just make an entry
+						my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
+						    or die $DBI::errstr;
+						
+						$sth = $dbh->prepare("SELECT EventId from outfalls WHERE Id = '${outfall_id}';");
+						$rv = $sth->execute
+						    or warn $sth->errstr;
+						my $eventid = $sth->fetchrow();
+						$sth->finish;
+
+						my $qpealert_tstamptz = yyyymmdd_hhMM_ToTimestampTZ($accumtimearr[-1]);
+						$sth = $dbh->prepare("UPDATE events SET PermitGaugeRainTime='${qpealert_tstamptz}' WHERE eventId = '${eventid}';");
+						$rv = $sth->execute
+						    or warn $sth->errstr;
+						$sth->finish;
+
+						$dbh->disconnect;
+					    }
+					    if ($runningGaugeTotal < $threshold) {
+						print "threshold: " . $threshold . " rt: " . $runningGaugeTotal . "\n";
+						$startEpoch = $endEpoch;
+						$endEpoch += 300;
 						$end_str = epochTo_yyyymmdd_hhMM($endEpoch);
 						push @accumtimearr, $end_str;
 						my $endp = "https://droc2.srh.noaa.gov/cgi-bin/precip_query.pl?start=" . $start_str . "&end=" .
@@ -267,8 +570,9 @@ sub file_monitor {
 						print "Endpoint $endp \n";
 						$runningTotal += getQPE($endp);
 						push @totarr, $runningTotal;
+						$runningGaugeTotal += get_permit_data($startEpoch, $endEpoch);
 						$start_str = $end_str;
-						sleep(60);
+						sleep(300);
 					    }
 					    else {
 						$accumulating = 0;
@@ -277,7 +581,7 @@ sub file_monitor {
 				    
 				    
 					print "alert!\n";
-				    
+	
 					#make pngs
 					
 					#flow graph
@@ -321,7 +625,8 @@ sub file_monitor {
 					#qpe graph
 					my @accummaster = (
 					    [@accumtimearr],
-					    [@totarr]
+					    [@totarr],
+					    [@gaugetotarr]
 					    );
 					
 					my $accummax = max @totarr;
@@ -376,15 +681,53 @@ sub file_monitor {
 					my $message = 'Following the flow event at ' . $loc . ' CASA has detected rainfall exceeding ' . $threshold . 'inches';
 					send_email($from, $to, $subject, $message, $event_no);
 					
+					#update database
+					my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
+					    or die $DBI::errstr;
+					$sth = $dbh->prepare("UPDATE outfalls SET AccumulatingRainfall='false' WHERE Id = '${outfall_id}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+
+					$sth = $dbh->prepare("SELECT EventId from outfalls WHERE Id = '${outfall_id}';"); 
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					my $eventid = $sth->fetchrow();
+					$sth->finish;
+
+					my $samplestr = "sample";
+					$sth = $dbh->prepare("UPDATE events SET outcome = ? WHERE eventId = '${eventid}';");
+					$sth->bind_param(1,$samplestr);
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+					
+					my $qpealert_tstamptz = yyyymmdd_hhMM_ToTimestampTZ($accumtimearr[-1]);
+					$sth = $dbh->prepare("UPDATE events SET PermitGaugeRainTime='${qpealert_tstamptz}' WHERE eventId = '${eventid}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+
+					$sth = $dbh->prepare("UPDATE outfalls SET eventid=null WHERE Id = '${outfall_id}';");
+					$rv = $sth->execute
+					    or warn $sth->errstr;
+					$sth->finish;
+
+					$dbh->disconnect;
+
+					#increment event
 					$event_no++;
-				    
+
 					#reset variables
 					@flowarr = ();
 					@timearr = ();
 					@timestamps = ();
+					@permitvals = ();
+					@permittimes = ();
 					@delta_ts = ();
 					$initial_delta = 0;
 					$waiting = 0;
+					$event_created = 0;
 				    }
 				}
 			    }
@@ -413,16 +756,24 @@ sub daemonize {
 }
 
 sub command_line_parse {
-    if (($#ARGV < 0) || ($#ARGV > 2)) {
-	print "Usage:  outfall_mon.pl input_dir outfall_id field_to_monitor (1 or 2) \n";
+    if (($#ARGV < 0) || ($#ARGV > 3)) {
+	print "Usage:  outfall_mon.pl input_dir outfall_id field_to_monitor (1 or 2 or 4 ->  flow, velocity, or level) data_format (0 or 1 -> via sharepoint or ftp)\n";
 	exit;
     }
     $input_data_dir = $ARGV[0];
     $outfall_id = $ARGV[1];
     $field_to_monitor = $ARGV[2];
-    if (($field_to_monitor != 1) && ($field_to_monitor != 2)) {
+    my $data_format = $ARGV[3];
+    if (($data_format != 0) && ($data_format != 1)) {
+	print "bad dataformat.  Assuming sharepoint ie. 0 \n";
+	$data_format = 0;
+    }
+    if (($field_to_monitor != 1) && ($field_to_monitor != 2) && ($field_to_monitor != 4)) {
 	print "bad field.  Using flow, ie. 1 \n";
 	$field_to_monitor = 1;
+    }
+    if ($data_format == 1) {
+	$field_to_monitor = $field_to_monitor + 1;
     }
     my @rdd = split(/ /, $input_data_dir);
     foreach $w (@rdd) {
@@ -463,13 +814,59 @@ sub timestringToEpoch {
     #print "datestr " . $datedt->iso8601() . "\n";
     return($epoch);
 }
-    
+
+sub timestringToTimestampTZ {
+    my $timestring = $_[0];
+    my @datestr_components = split(' ', $timestring);
+    my @date_components = split('/', $datestr_components[0]);
+    my $yr = $date_components[2];
+    my $mo = $date_components[0];
+    my $dy = $date_components[1];
+    my @time_components = split(':', $datestr_components[1]);
+    my $hr = $time_components[0];
+    my $mn = $time_components[1];
+    my $ss = "00";
+    my $datedt = DateTime->new(year => $yr, month => $mo, day => $dy, hour => $hr, minute => $mn, second => $ss, nanosecond => 0, time_zone  => 'America/Chicago');
+    my $tzsuffix;
+    if ($datedt->is_dst()) {
+	$tzsuffix = "-05";
+    }
+    else {
+	$tzsuffix = "-06";
+    }
+    my $timestamptz = $yr . "-" . $mo . "-" . $dy . " " . $hr . ":" . $mn . ":" . $ss . $tzsuffix;
+    #my $epoch = $datedt->epoch();
+    #print "datestr " . $datedt->iso8601() . "\n";
+    #return($datedt->iso8601());
+    return($timestamptz);
+}
+
 sub epochTo_yyyymmdd_hhMM {
     my $epoch = $_[0];
     my ($sec, $min, $hour, $day, $month, $year) = (localtime($epoch))[0,1,2,3,4,5];
     my $yyyymmdd_hhMM = sprintf '%04d%02d%02d-%02d%02d', $year + 1900, $month + 1, $day, $hour, $min;
     #print "yyyymmdd_hhMM : " . $yyyymmdd_hhMM . "\n";
     return $yyyymmdd_hhMM;	
+}
+
+sub yyyymmdd_hhMM_ToTimestampTZ {
+    my $timestring = $_[0];
+    my $yr = substr($timestring, 0,4);
+    my $mo = substr($timestring, 4,2);
+    my $dy = substr($timestring, 6,2);
+    my $hr = substr($timestring, 9,2);
+    my $mn = substr($timestring, 11,2);
+    my $ss = "00";
+    my $datedt = DateTime->new(year => $yr, month => $mo, day => $dy, hour => $hr, minute => $mn, second => $ss, nanosecond => 0, time_zone  => 'America/Chicago');
+    my $tzsuffix;
+    if ($datedt->is_dst()) {
+	$tzsuffix = "-05";
+    }
+    else {
+	$tzsuffix = "-06";
+    }
+    my $timestamptz = $yr . "-" . $mo . "-" . $dy . " " . $hr . ":" . $mn . ":" . $ss . $tzsuffix;
+    return($timestamptz);
 }
 
 sub getQPE {
@@ -527,4 +924,50 @@ sub send_email {
 		     Filename => 'qpe_event_' . $event_no . '.png', Disposition => 'attachment' );
     }
     $eml->send;
+}
+
+sub get_permit_data{
+    my $start_epoch = $_[0];
+    my $end_epoch = $_[1];
+    my $apikey = "aeviyukrsmi1yafiucfflf2elmymrqha";
+    my $apisecret = "myi3edklxeym6px9kbmro4blseygfjwj";
+    my $stationid = "37870";
+    my $t = time();
+    my $authdata = "api-key" . $apikey . "end-timestamp" . $end_epoch . "start-timestamp" . $start_epoch . "station-id" . $stationid . "t" . $t;
+    my $apisig = hmac_sha256_hex(encode("utf-8", $authdata), encode("utf-8", $apisecret));
+    my $wlinkurl = "https://api.weatherlink.com/v2/historic/" . $stationid . "?api-key=" . $apikey . "&t=" . $t . "&start-timestamp=" . $start_epoch . "&end-timestamp=" . $end_epoch . "&api-signature=" . $apisig;
+    my $getcli = REST::Client->new();
+    $getcli->GET($wlinkurl);
+    my $jscalar = from_json($getcli->responseContent());
+    print $jscalar . " jscalar " . $getcli->responseContent() . " getcli\n";
+    my @objects = keys %jscalar;
+    foreach my $key (@objects) {
+	print $key . "\n";
+    }
+    my @dataarray = @{$jscalar->{'sensors'}[0]->{'data'}};
+    my $datalen = scalar(@dataarray);
+    my $intervalAccum = 0;
+    
+    if ($datalen < 1) {
+	$gauge_online = 0;
+    }
+    else {
+	$gauge_online = 1;
+	my @gaugeAccums;
+	for(my $c=0; $c < $datalen; $c++) {
+	    if (looks_like_number($jscalar->{'sensors'}[0]->{'data'}[$c]->{'ts'})) {
+		my $utc_tstring = DateTime->from_epoch(epoch => $jscalar->{'sensors'}[0]->{'data'}[$c]->{'ts'});
+		$utc_tstring->set_time_zone('America/Chicago');
+		push @permittimes, $utc_tstring->iso8601();
+	    }
+	    if (looks_like_number($jscalar->{'sensors'}[0]->{'data'}[$c]->{'rainfall_in'})) {
+		push @permitvals, $jscalar->{'sensors'}[0]->{'data'}[$c]->{'rainfall_in'};
+		push @gaugeAccums, $jscalar->{'sensors'}[0]->{'data'}[$c]->{'rainfall_in'};
+	    }
+	}
+	foreach my $accum (@gaugeAccums) {
+	    $intervalAccum = $intervalAccum + $accum;
+	}
+    }
+    return $intervalAccum;
 }
