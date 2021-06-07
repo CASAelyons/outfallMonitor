@@ -169,7 +169,7 @@ sub file_monitor {
 		    my @datalines = split(/\n/, $data);
 		    shift @datalines;
 		    shift @datalines;
-		    shift@datalines;
+		    shift @datalines;
 		    $data = join "\n", @datalines;
 		}
 		while (my $line = <$data>) {
