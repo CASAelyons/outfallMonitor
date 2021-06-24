@@ -38,7 +38,7 @@ our $field_to_read;
 our $data_format;
 &command_line_parse;
 
-#&daemonize;
+&daemonize;
 
 our @delta_ts;
 our $latest_flow;
@@ -64,6 +64,8 @@ our $initialized = 0;
 our @initialization;
 our $baseflow;
 our $basedeviation;
+our $deltaMultiplier;
+our $baseflowDevisor;
 our $maybe = 0;  #to account for oneoff type noise
 
 #our $startEpoch;
@@ -245,7 +247,7 @@ sub file_monitor {
 		$latest_flow = $fields[$field_to_read];
 		if ($initial_delta == 0) {
 		    if ($maybe == 0) {
-			if (($latest_delta > 3*$basedeviation) || (($latest_flow - $baseflow) > ($baseflow/5))) {
+			if (($latest_delta > ($deltaMultiplier*$basedeviation)) || (($latest_flow - $baseflow) > ($baseflow/$baseflowDevisor))) {
 			    print "latest delta: " . $latest_delta . "\n";
 			    print "latest flow: " . $latest_flow . "\n";
 			    print "baseflow: " . $baseflow . "\n";
@@ -719,6 +721,7 @@ sub command_line_parse {
     $outfall_id = $ARGV[1];
     $field_to_monitor = $ARGV[2];
     $data_format = $ARGV[3];
+    
     if (($data_format != 0) && ($data_format != 1)) {
 	print "bad dataformat.  Assuming sharepoint ie. 0 \n";
 	$data_format = 0;
@@ -727,6 +730,20 @@ sub command_line_parse {
 	print "bad field.  Using flow, ie. 1 \n";
 	$field_to_monitor = 1;
     }
+
+    ### these are heuristic comparisons of report to report change and baseflow change
+    ##baseflowDevisor of 5 means 20% of baseflow... ie.... if flow is 20% higher than baseflow
+    ##deltaMultiplier of 3 means 300% > than the normal 5 minute deviations in a baseflow state
+    ##ie. if the change is .3 and the normal variability is .1...
+    if ($field_to_monitor == 4) {
+	$deltaMultiplier = 5;
+	$baseflowDevisor = 3;
+    }
+    else {
+	$deltaMultiplier = 3;
+	$baseflowDevisor = 5;
+    }
+    print "Delta Multiplier: " . $deltaMultiplier . " Baseflow Devisor: " . $baseflowDevisor . "\n";
     if ($data_format == 1) {
 	$field_to_read = $field_to_monitor + 1;
     }
