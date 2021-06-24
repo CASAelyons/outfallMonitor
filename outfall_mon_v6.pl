@@ -38,7 +38,7 @@ our $field_to_read;
 our $data_format;
 &command_line_parse;
 
-&daemonize;
+#&daemonize;
 
 our @delta_ts;
 our $latest_flow;
@@ -273,13 +273,16 @@ sub file_monitor {
 			$dbh->disconnect;
 			$initial_delta = 1;
 			$maybe = 0;
+			push @flowarr, $fields[$field_to_read];
+			push @timearr, $timefield;
+			next;
 		    }
 		    else {
 			$maybe = 0;
+			@timearr = ();
+			@flowarr = ();
+			next;
 		    }
-		    push @flowarr, $fields[$field_to_read];
-		    push @timearr, $timefield;
-		    next;
 		}
 
 		#flow has already been detected
