@@ -846,7 +846,7 @@ sub yyyymmdd_hhMM_ToTimestampTZ {
     my $hr = substr($timestring, 9,2);
     my $mn = substr($timestring, 11,2);
     my $ss = "00";
-    my $datedt = DateTime->new(year => $yr, month => $mo, day => $dy, hour => $hr, minute => $mn, second => $ss, nanosecond => 0, time_zone  => 'America/Chicago');
+    my $datedt = DateTime->new(year => $yr, month => $mo, day => $dy, hour => $hr, minute => $mn, second => $ss, nanosecond => 0);
     my $tzsuffix;
     if ($datedt->is_dst()) {
 	$tzsuffix = "-05";
