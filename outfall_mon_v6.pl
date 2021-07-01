@@ -642,6 +642,11 @@ sub file_monitor {
 			or warn $sth->errstr;
 		    $sth->finish;
 
+		    $sth = $dbh->prepare("UPDATE events SET ProductType='${field_to_monitor}' WHERE EventId = '${eventid}';");
+		    $rv = $sth->execute
+			or warn $sth->errstr;
+		    $sth->finish;
+		    
 		    $sth = $dbh->prepare("UPDATE outfalls SET EventId='${eventid}' WHERE Id = '${outfall_id}';");
 		    $rv = $sth->execute
 			or warn $sth->errstr;
@@ -846,7 +851,7 @@ sub yyyymmdd_hhMM_ToTimestampTZ {
     my $hr = substr($timestring, 9,2);
     my $mn = substr($timestring, 11,2);
     my $ss = "00";
-    my $datedt = DateTime->new(year => $yr, month => $mo, day => $dy, hour => $hr, minute => $mn, second => $ss, nanosecond => 0);
+    my $datedt = DateTime->new(year => $yr, month => $mo, day => $dy, hour => $hr, minute => $mn, second => $ss, nanosecond => 0, time_zone  => 'UTC');
     my $tzsuffix;
     if ($datedt->is_dst()) {
 	$tzsuffix = "-05";
