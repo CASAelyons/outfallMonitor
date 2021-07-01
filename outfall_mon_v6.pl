@@ -252,10 +252,10 @@ sub file_monitor {
 			    print "latest flow: " . $latest_flow . "\n";
 			    print "baseflow: " . $baseflow . "\n";
 			    $maybe = 1;
+			    push @flowarr, $fields[$field_to_read];
+			    push @timearr, $timefield;
+			    next;
 			}
-			push @flowarr, $fields[$field_to_read];
-			push @timearr, $timefield;
-			next;
 		    }
 		    if ((($latest_flow - $baseflow) > ($baseflow/5)) && ($latest_delta > 0)) {
 			#still above base flow and going up for the second run in a row
@@ -389,7 +389,7 @@ sub file_monitor {
 			    my $eventid = $sth->fetchrow();
 			    $sth->finish;
 
-			    my $inittstamptz = timestringToTimestampTZ($timefield);
+			    my $inittstamptz = timestringToTimestampTZ($timearr[-1]);
 			    $sth = $dbh->prepare("UPDATE events SET AccumulateStartTime='${inittstamptz}' WHERE EventId = '${eventid}';");
 			    $rv = $sth->execute
 				or warn $sth->errstr;
@@ -409,7 +409,6 @@ sub file_monitor {
 		} # /if waiting
 
 		if ($accumulating) {
-
 		    my $startEpoch = timestringToEpoch($timestamps[-4]);
 		    print "startEpoch " . $startEpoch . "\n";
 
@@ -435,6 +434,7 @@ sub file_monitor {
 
 		    if ($runningTotal > $threshold) {
 			#for now just make an entry
+			print "CASA rainfall threshold reached!\n";
 			my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
 			    or die $DBI::errstr;
 
@@ -445,6 +445,7 @@ sub file_monitor {
 			$sth->finish;
 
 			my $qpealert_tstamptz = yyyymmdd_hhMM_ToTimestampTZ($end_str);
+			#my $qpealert_tstamptz = timestringToTimestampTZ($timearr[-1]);
 			$sth = $dbh->prepare("UPDATE events SET CasaRainTime='${qpealert_tstamptz}' WHERE eventId = '${eventid}' AND CasaRainTime IS NULL;");
 			$rv = $sth->execute
 			    or warn $sth->errstr;
@@ -623,18 +624,18 @@ sub file_monitor {
 
 		    my $dbh = DBI->connect($db, $db_user, $db_pass, { RaiseError => 1 })
 			or die $DBI::errstr;
-
-		    my $sth = $dbh->prepare("INSERT into events(outfallid) VALUES(${outfall_id});");
+		   
+		    my $sth = $dbh->prepare("INSERT into events(outfallid) VALUES('${outfall_id}');");
 		    my $rv = $sth->execute
 			or warn $sth->errstr;
 		    $sth->finish;
-
+		    
 		    $sth = $dbh->prepare("SELECT EventId FROM events WHERE outfallid = '${outfall_id}' ORDER BY EventId DESC NULLS LAST;");
 		    $rv = $sth->execute
 			or warn $sth->errstr;
 		    my $eventid = $sth->fetchrow();
 		    $sth->finish;
-
+		   
 		    my $ongoingstr = "ongoing";
 		    $sth = $dbh->prepare("UPDATE events SET outcome = ? WHERE EventId = '${eventid}';");
 		    $sth->bind_param(1,$ongoingstr);
@@ -685,7 +686,7 @@ sub file_monitor {
 			or warn $sth->errstr;
 		    $sth->finish;
 
-		    my $endtstamptz = timestringToTimestampTZ($timefield);
+		    my $endtstamptz = timestringToTimestampTZ($timearr[-1]);
 		    $sth = $dbh->prepare("UPDATE events SET FlowEndTime='${endtstamptz}' WHERE EventId = '${eventid}';");
 		    $rv = $sth->execute
 				or warn $sth->errstr;
@@ -852,14 +853,16 @@ sub yyyymmdd_hhMM_ToTimestampTZ {
     my $mn = substr($timestring, 11,2);
     my $ss = "00";
     my $datedt = DateTime->new(year => $yr, month => $mo, day => $dy, hour => $hr, minute => $mn, second => $ss, nanosecond => 0, time_zone  => 'UTC');
-    my $tzsuffix;
-    if ($datedt->is_dst()) {
-	$tzsuffix = "-05";
-    }
-    else {
-	$tzsuffix = "-06";
-    }
-    my $timestamptz = $yr . "-" . $mo . "-" . $dy . " " . $hr . ":" . $mn . ":" . $ss . $tzsuffix;
+    #only using these for timestamps already converted to UTC so no need for tz suffix... leaving here in case we want the option to convert at some point
+    #my $tzsuffix;
+    #if ($datedt->is_dst()) {
+    #   $tzsuffix = "-05";
+    #}
+    #else {
+    #	$tzsuffix = "-06";
+    #}
+    #my $timestamptz = $yr . "-" . $mo . "-" . $dy . " " . $hr . ":" . $mn . ":" . $ss . $tzsuffix;
+    my $timestamptz = $yr . "-" . $mo . "-" . $dy . " " . $hr . ":" . $mn . ":" . $ss . "+00";
     return($timestamptz);
 }
 
@@ -930,13 +933,14 @@ sub get_permit_data{
     my $authdata = "api-key" . $apikey . "end-timestamp" . $end_epoch . "start-timestamp" . $start_epoch . "station-id" . $stationid . "t" . $t;
     my $apisig = hmac_sha256_hex(encode("utf-8", $authdata), encode("utf-8", $apisecret));
     my $wlinkurl = "https://api.weatherlink.com/v2/historic/" . $stationid . "?api-key=" . $apikey . "&t=" . $t . "&start-timestamp=" . $start_epoch . "&end-timestamp=" . $end_epoch . "&api-signature=" . $apisig;
+    print "URL: " . $wlinkurl . "\n";
     my $getcli = REST::Client->new();
     $getcli->GET($wlinkurl);
     my $jscalar = from_json($getcli->responseContent());
-    #print $jscalar . " jscalar " . $getcli->responseContent() . " getcli\n";
-    my @objects = keys %jscalar;
+    print "response: " . $getcli->responseContent() . "\n";
+    #my @objects = keys %jscalar;
     #foreach my $key (@objects) {
-	#print $key . "\n";
+    #print "key: " . $key . "\n";
     #}
     my @dataarray = @{$jscalar->{'sensors'}[0]->{'data'}};
     my $datalen = scalar(@dataarray);
