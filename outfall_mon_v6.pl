@@ -38,7 +38,7 @@ our $field_to_read;
 our $data_format;
 &command_line_parse;
 
-&daemonize;
+#&daemonize;
 
 our @delta_ts;
 our $latest_flow;
@@ -895,7 +895,7 @@ sub get_outfall_ll {
 	my $feat = ($obj->features)[0][$featno];
 	my @proparr = $feat->properties;
 	my $OF_id = $proparr[0]{OUTFALL};
-	if ($OF_id == $outfall_id) {
+	if ($OF_id eq $outfall_id) {
 	    my $featgeo = $feat->geometry;
 	    my @coords = $featgeo->coordinates;
 	    $lon = $coords[0][0];
