@@ -37,8 +37,11 @@ while (my @row = $sth->fetchrow_array) {
     elsif ($row[2] == 2) {
 	$prodtype = "velocity";
     }
-    else {
+    elsif ($row[2] == 4) {
 	$prodtype = "water level";
+    }
+    else {
+	$prodtype = "streamflow";
     }
     
     my $abvbaseflow_img;
@@ -82,18 +85,24 @@ $sql = q/select * from events/;
 $sth = $dbh->prepare($sql);
 $sth->execute;
 
-print $cgi->table({-border=>1}), $cgi->Tr ( $cgi->th( $sth->{NAME}->[0]) . $cgi->th($sth->{NAME}->[1]) . $cgi->th($sth->{NAME}->[2]) . $cgi->th($sth->{NAME}->[3]) . $cgi->th($sth->{NAME}->[4]) . $cgi->th($sth->{NAME}->[5]) . $cgi->th($sth->{NAME}->[6]) . $cgi->th($sth->{NAME}->[7]) . $cgi->th($sth->{NAME}->[8]) . $cgi->th($sth->{NAME}->[9]));
+print $cgi->table({-border=>1}), $cgi->Tr ( $cgi->th( $sth->{NAME}->[0]) . $cgi->th($sth->{NAME}->[1]) . $cgi->th($sth->{NAME}->[2]) . $cgi->th($sth->{NAME}->[3]) . $cgi->th($sth->{NAME}->[4]) . $cgi->th($sth->{NAME}->[5]) . $cgi->th($sth->{NAME}->[6]) . $cgi->th($sth->{NAME}->[7]) . $cgi->th($sth->{NAME}->[8]) . $cgi->th($sth->{NAME}->[9]) . $cgi->th($sth->{NAME}->[10]));
 
 while (my @row = $sth->fetchrow_array) {
     my $prodtype;
     if ($row[8] == 1) {
 	$prodtype = "streamflow";
     }
-    else {
+    elsif ($row[8] == 2) {
+	$prodtype = "velocity";
+    }
+    elsif ($row[8] == 4) {
 	$prodtype = "water level";
     }
+    else {
+	$prodtype = "streamflow";
+    }
     
-    print $cgi->Tr( $cgi->td( $cgi->center($row[0]) ) . $cgi->td( $cgi->center($row[1] )) . $cgi->td( $cgi->center($row[2] )) . $cgi->td ( $cgi->center($row[3])) . $cgi->td ( $cgi->center($row[4])) . $cgi->td ( $cgi->center($row[5])) . $cgi->td( $cgi->center($row[6])) . $cgi->td( $cgi->center($row[7])) . $cgi->td( $cgi->center($prodtype)) . $cgi->td( $cgi->center($row[9])));
+    print $cgi->Tr( $cgi->td( $cgi->center($row[0]) ) . $cgi->td( $cgi->center($row[1] )) . $cgi->td( $cgi->center($row[2] )) . $cgi->td ( $cgi->center($row[3])) . $cgi->td ( $cgi->center($row[4])) . $cgi->td ( $cgi->center($row[5])) . $cgi->td( $cgi->center($row[6])) . $cgi->td( $cgi->center($row[7])) . $cgi->td( $cgi->center($prodtype)) . $cgi->td( $cgi->center($row[9])) . $cgi->td( $cgi->center($row[10])));
 }
 
 $sth->finish;
