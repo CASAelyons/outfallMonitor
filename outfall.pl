@@ -81,7 +81,7 @@ while (my @row = $sth->fetchrow_array) {
 
 $sth->finish;
 
-$sql = q/select * from events/;
+$sql = q/select * from events order by eventid desc/;
 $sth = $dbh->prepare($sql);
 $sth->execute;
 
