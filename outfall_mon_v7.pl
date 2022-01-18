@@ -37,6 +37,7 @@ our $field_to_monitor;
 our $field_to_read;
 our $data_format;
 &command_line_parse;
+#&get_station_id;
 
 &daemonize;
 
@@ -212,8 +213,8 @@ sub file_monitor {
 		$dbh->disconnect;
 
 		#error check
-		if ((!looks_like_number($fields[$field_to_read])) || ($fields[$field_to_read] < 0) 
-		    || (($initialized) && ($baseflow > 0) && ($fields[$field_to_read] == 0))) {
+		if ((!looks_like_number($fields[$field_to_read])) || ($fields[$field_to_read] < 0)) { 
+		#    || (($initialized) && ($baseflow > 0) && ($fields[$field_to_read] == 0))) { #removing zero check
 		    next;
 		}
 
@@ -257,7 +258,8 @@ sub file_monitor {
 			    next;
 			}
 		    }
-		    if ((($latest_flow - $baseflow) > ($baseflow/5)) && ($latest_delta > 0)) {
+		    #if ((($latest_flow - $baseflow) > ($baseflow/$baseflowDevisor)) && ($latest_delta > 0)) {
+		    if (($latest_flow - $baseflow) > ($baseflow/$baseflowDevisor)) { #remove requirement that it has to go up twice in a row
 			#still above base flow and going up for the second run in a row
 			#first time flow was detected
 			print "latest delta: " . $latest_delta . "\n";
@@ -361,7 +363,7 @@ sub file_monitor {
 			next;
 		    }
 		    else {
-			my $waittime = $nowEpoch - $flow_endtime;
+			my $waittime = $nowEpoch - timestringToEpoch($flow_endtime);
 			print "wait time: " . $waittime . "\n";
 			if ($waittime < 259200) {
 			    #if less than 72 hours, continue
@@ -616,8 +618,8 @@ sub file_monitor {
 		    else {
 			$baseflow = $flowarr[-1];
 		    }
-		
-		    if ((abs($recent_av_delta) < 2*$basedeviation) && ($latest_flow < 3*$baseflow)) {
+		    
+		    if ((abs($recent_av_delta) <= 2*$basedeviation) && ($latest_flow <= 3*$baseflow)) {
 			$waiting = 1;
 		    }
 		    else {
@@ -932,12 +934,28 @@ sub send_email {
     $eml->send;
 }
 
+sub get_station_id{
+    my $apikey = "aeviyukrsmi1yafiucfflf2elmymrqha";
+    my $apisecret = "myi3edklxeym6px9kbmro4blseygfjwj";
+    my $t = time();
+    my $authdata = "api-key" . $apikey . "t" . $t;
+    my $apisig = hmac_sha256_hex(encode("utf-8", $authdata), encode("utf-8", $apisecret));
+    my $wlinkurl = "https://api.weatherlink.com/v2/stations?api-key=" . $apikey . "&t=" . $t . "&api-signature=" . $apisig;
+    print "URL: " . $wlinkurl . "\n";
+    my $getcli = REST::Client->new();
+    $getcli->GET($wlinkurl);
+    my $jscalar = from_json($getcli->responseContent());
+    print "response: " . $getcli->responseContent() . "\n";
+    return;
+}
+
 sub get_permit_data{
     my $start_epoch = $_[0];
     my $end_epoch = $_[1];
     my $apikey = "aeviyukrsmi1yafiucfflf2elmymrqha";
     my $apisecret = "myi3edklxeym6px9kbmro4blseygfjwj";
-    my $stationid = "37870";
+    #my $stationid = "37870";
+    my $stationid = "124829";  #acquired manually from above get_station_id subroutine
     my $t = time();
     my $authdata = "api-key" . $apikey . "end-timestamp" . $end_epoch . "start-timestamp" . $start_epoch . "station-id" . $stationid . "t" . $t;
     my $apisig = hmac_sha256_hex(encode("utf-8", $authdata), encode("utf-8", $apisecret));
