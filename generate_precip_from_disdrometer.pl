@@ -1,0 +1,471 @@
+#!/usr/bin/perl -w
+
+##################################################################################################
+#####WRITTEN BY ERIC LYONS 12/2012 for CASA, UNIVERSITY OF MASSACHUSETTS##########################
+##################################################################################################
+#  TESTED FUNCTIONALITY:                                                                         #
+#  
+#  v0.9 creates a netcdf file containing qpe accumulation over the specified interval
+#  #                                                                                             #
+##################################################################################################
+use strict;
+use warnings;
+
+use POSIX qw(setsid);
+use Scalar::Util qw(looks_like_number);
+use File::Path;
+#use File::Copy;
+use DateTime;
+#use PDL;
+use GD::Graph;
+use GD::Graph::lines;
+use Fcntl;
+use lib "/home/elyons/perl";
+
+our $DATA_LOCATION = "/home/elyons/disdrometer";
+
+our $START_TIME; #START_TIME given on command line
+our $END_TIME; #END_TIME given on command line
+our $ENDTIME_YMD;
+our $ENDTIME_HMS;
+our $OUTPUT_DIR; #OUTPUT_DIR given on command line
+our $start_epoch;
+our $end_epoch;
+our $start_ymd;
+our $end_ymd;
+our $start_hh;
+our $end_hh;
+our $start_mm;
+our $end_mm;
+our $sm1;
+our $sm2;
+our $em1;
+our $em2;
+our $mid_m1;
+our $mid_hh;
+our $this_ymd;
+our $this_hh;
+our $min_in_day;
+our $startfile_ymdhms;
+our @filelist;
+our @times;
+our @accums;
+our @totals;
+our $total = 0;
+our $outpngname;
+our $params;
+&command_line_parse;
+&create_file_list;
+
+create_disdrometer_time_series( @filelist );
+&graph_data;
+
+exit;
+
+sub create_disdrometer_time_series {
+    foreach my $file (@filelist) {
+	&extract_accum_and_time($file);
+    }
+}
+
+sub extract_accum_and_time {
+    my $fname = shift;
+
+    #get time
+    my $eyyyy = substr $fname, -19, 4;
+    my $emo = substr $fname, -15, 2;
+    my $edy = substr $fname, -13, 2;
+    my $ehh = substr $fname, -10, 2;
+    my $emi = substr $fname, -8, 2;
+    my $ems = substr $fname, -6, 2;
+    my $edt = DateTime->new( year => $eyyyy, month => $emo, day => $edy, hour => $ehh, minute => $emi, second => $ems, time_zone => "UTC");
+    $edt->set_time_zone('America/Chicago');
+    my $outtmstr = $edt->strftime("%Y%m%d-%H%M%S");
+    push @times, $outtmstr;
+
+    #get accum
+    open my $fh, '<', $fname or die "$fname: $!";
+    my $line;
+    while( <$fh> ) {
+	if( $. == 2 ) {
+	    $line = $_;
+	    last;
+	}
+    }
+    my @valspl = split(':', $line);
+    my $accumval = $valspl[1];
+    push @accums, $accumval;
+    $total = $total + $accumval;
+    push @totals, $total;
+}
+
+sub graph_data {
+    #make a plot
+    my $plottitle = "SE HoldPad Disdrometer Rainfall from " . $times[0] . " to " . $times[-1];
+    my $graph = GD::Graph::lines->new(1000,500);
+
+    $graph->set(
+	x_label            => 'Time',
+	y_label            => 'Inches',
+	title              => $plottitle,
+	y_max_value        => 5,
+	#y_tick_number      => 7,
+	y_long_ticks       => 1,
+	y_all_ticks        => 1,
+	#y_min_value        => -3,
+	t_margin           => 10,
+	b_margin           => 10,
+	x_label_skip       => 5,
+	x_labels_vertical  => 1,
+	x_label_position   => 1/2,
+	transparent        => 0,
+	legend_placement   => 'RC',
+	dclrs              => ['#4d7296'],
+	borderclrs         => [undef],
+	boxclr             => "white",
+	bgclr              => "#fffd48",
+	fgclr              => '#bbbbbb',
+	axislabelclr       => '#333333',
+	labelclr           => '#333333',
+	textclr            => '#333333',
+	legendclr          => '#333333',
+	line_width         => 2
+	#bgclr              => "white",
+	#box_axis            => 0,
+	#bargroup_spacing   => 2
+	);
+
+    my @series = ("Rainfall Accumulation");
+
+    #set the fonts
+    #my $fontloc = "/usr/share/fonts/truetype/freefont/FreeSans.ttf";
+    my $fontloc = '/fonts/arial.ttf';
+    $graph->set_title_font($fontloc, 16);
+    $graph->set_x_label_font($fontloc, 12);
+    $graph->set_y_label_font($fontloc, 12);
+    $graph->set_legend_font($fontloc, 10);
+    $graph->set_x_axis_font($fontloc, 10);
+    $graph->set_y_axis_font($fontloc, 10);
+
+    #set the legend
+    $graph->set_legend ( @series );
+
+    #set the data
+    my @dataset = (
+	[ @times ],
+	[ @totals ]
+	);
+
+    #make the plot
+    my $pngname = "disdrometer_rainfall_" . $times[0] . "_" . $times[-1] . ".png";
+    my $plotfile = $OUTPUT_DIR . "/" . $pngname;
+    my $gd = $graph->plot(\@dataset) or die $graph->error;
+    open(IMG, '>', $plotfile) or die $!;
+    binmode IMG;
+    print IMG $gd->png;
+}
+
+sub create_file_list {
+    if ($start_ymd == $end_ymd) {
+	if ($start_hh == $end_hh) {
+	    if ($sm1 == $em1) {
+		&get_minutes_only;
+	    }
+	    else {
+		&get_start_minutes;
+		&get_end_minutes;
+		$mid_m1 = $sm1 + 1;
+		$this_ymd = $start_ymd;
+		$this_hh = $start_hh;
+		while ($mid_m1 != $em1) {
+		    &get_mid_minutes;
+		    $mid_m1++;
+		}
+	    }
+	}
+	else {
+	    &get_start_hour;
+	    &get_end_hour;
+	    $mid_hh = $start_hh + 1;
+	    if ($mid_hh > 23) {
+		$mid_hh = 0;
+		$this_ymd = $end_ymd;
+	    }
+	    else {
+		$this_ymd = $start_ymd;
+	    }
+	    while ($mid_hh != $end_hh) {
+		&get_mid_hour;
+		$mid_hh++;
+		if ($mid_hh > 23) {
+		    $mid_hh = 0;
+		    $this_ymd = $end_ymd;
+		}
+	    }
+	}	    
+    }
+    else {
+	&get_start_hour;
+	if ($start_hh < 23) {
+	    $mid_hh = $start_hh + 1;
+	    while ($mid_hh < 24) {
+		&get_mid_hour;
+		$mid_hh++;
+	    }
+	}
+	&get_end_hour;
+	if ($end_hh > 0) {
+	    $mid_hh = 00;
+	    while ($mid_hh != $end_hh) {
+		&get_mid_hour;
+		$mid_hh++;
+	    }
+	}
+    }
+    @filelist = sort @filelist;
+    my $startfile_ymd = substr $filelist[0], -19, 8;
+    my $startfile_hms = substr $filelist[0], -10, 6;
+    $startfile_ymdhms = $startfile_ymd . "-" . $startfile_hms;
+}
+
+sub get_minutes_only {
+    my $hhmm_pattern = $end_ymd . "_" . $end_hh . $em1 . "\[$sm2\-$em2\]";
+    my $datadir = "$DATA_LOCATION/$end_ymd";
+    opendir(DIR, $datadir);
+    my @matching_files_in_dir = grep(/$hhmm_pattern/, readdir(DIR));
+    closedir(DIR);
+    foreach my $matching_file (@matching_files_in_dir) {
+	my $match_path = $datadir . "/" . $matching_file;
+	push @filelist, $match_path;
+    }
+}
+    
+sub get_end_minutes {
+    my $em_pattern = $end_ymd . "_" . $end_hh . $em1 . "\[0\-$em2\]";
+    my $datadir = "$DATA_LOCATION/$end_ymd";
+    opendir(DIR, $datadir);
+    my @matching_files_in_dir = grep(/$em_pattern/, readdir(DIR));
+    closedir(DIR);
+    foreach my $matching_file (@matching_files_in_dir) {
+	my $match_path =$datadir . "/" . $matching_file;
+        push @filelist, $match_path;
+    }
+}
+
+sub get_start_minutes {
+    my $sm_pattern = $start_ymd . "_" . $start_hh . $sm1 . "\[$sm2\-9\]";
+    my $datadir = "$DATA_LOCATION/$start_ymd";
+    opendir(DIR, $datadir);
+    my @matching_files_in_dir = grep(/$sm_pattern/, readdir(DIR));
+    closedir(DIR);
+    foreach my $matching_file (@matching_files_in_dir) {
+        my $match_path =$datadir . "/" . $matching_file;
+        push @filelist, $match_path;
+    }
+}
+
+sub get_mid_minutes {
+    my $mid_pattern = $this_ymd . "_" . $this_hh . $mid_m1 . "\[0\-9\]";
+    my $datadir = "$DATA_LOCATION/$this_ymd";
+    opendir(DIR, $datadir);
+    my @matching_files_in_dir = grep(/$mid_pattern/, readdir(DIR));
+    closedir(DIR);
+    foreach my $matching_file (@matching_files_in_dir) {
+        my $match_path =$datadir . "/" . $matching_file;
+        push @filelist, $match_path;
+    }
+}
+
+sub get_end_hour {
+    &get_end_minutes;
+    $mid_m1 = $em1 - 1;
+    $this_ymd = $end_ymd;
+    $this_hh = $end_hh;
+    while ($mid_m1 > -1) {
+	&get_mid_minutes;
+        $mid_m1--;
+    }
+}
+
+sub get_start_hour {
+    &get_start_minutes;
+    $mid_m1 = $sm1 + 1;
+    $this_ymd = $start_ymd;
+    $this_hh = $start_hh;
+    while ($mid_m1 < 6) {
+	&get_mid_minutes;
+	$mid_m1++;
+    }
+}
+
+sub get_mid_hour {
+    if ($mid_hh > 0) {
+	$mid_hh =~ s/^0//;
+    }
+    if ($mid_hh < 10) {
+	$mid_hh = "0" . $mid_hh;
+    }
+    my $midhr_pattern = $this_ymd . "_" . $mid_hh;
+    my $datadir = "$DATA_LOCATION/$this_ymd";
+    opendir(DIR, $datadir);
+    my @matching_files_in_dir = grep(/$midhr_pattern/, readdir(DIR));
+    closedir(DIR);
+    foreach my $matching_file (@matching_files_in_dir) {
+	my $match_path =$datadir . "/" . $matching_file;
+        push @filelist, $match_path;
+    }
+}
+
+sub command_line_parse {
+    
+    if ($#ARGV != 2) { 
+	print "Usage:  generate_1hr_precip_from_archive.pl <START YYYYMMDD-HHMM> <END YYYYMMDD-HHMM> <OUTPUT DIR> \n";
+	exit;
+    }
+
+    $START_TIME = $ARGV[0];
+    $END_TIME = $ARGV[1];
+    $OUTPUT_DIR = $ARGV[2];
+    my $mkdircall = "mkdir -p " . $OUTPUT_DIR;
+    system($mkdircall);
+    $start_ymd = substr($START_TIME, 0, 8);
+    $start_hh = substr($START_TIME, 9, 2);
+    $start_mm = substr($START_TIME, 11, 2);
+    $sm1 = substr($start_mm, 0, 1);
+    $sm2 = substr($start_mm, 1,1);
+    $end_ymd = substr($END_TIME, 0, 8);
+    $end_hh = substr($END_TIME, 9, 2);
+    $end_mm = substr($END_TIME, 11, 2);
+    $em1 = substr($end_mm, 0,1);
+    $em2 = substr($end_mm, 1,1);
+
+    my $start_yyyy = substr($start_ymd, 0, 4);
+    my $start_mo = substr($start_ymd, 4, 2);
+    my $start_dd = substr($start_ymd, 6, 2);
+    
+    if (( !looks_like_number($start_yyyy)) || ( !looks_like_number($start_mo)) || (!looks_like_number($start_dd)) || ( !looks_like_number($start_hh)) || ( !looks_like_number($start_mm))){
+	print "Enter numeric values for times... exiting\n";
+	exit;
+    }
+    
+    my $end_yyyy = substr($end_ymd, 0, 4);
+    my $end_mo = substr($end_ymd, 4, 2);
+    my $end_dd = substr($end_ymd, 6, 2);
+
+    if (( !looks_like_number($end_yyyy)) || ( !looks_like_number($end_mo)) || (!looks_like_number($end_dd)) || ( !looks_like_number($end_hh)) || ( !looks_like_number($end_mm))){ 
+        print "Enter numeric values for times... exiting\n";
+	exit;
+    }
+    
+    my $start_date = DateTime->new( year => $start_yyyy, month => $start_mo, day => $start_dd, hour => $start_hh, minute => $start_mm, second => 0, time_zone => "UTC");
+    $start_epoch = $start_date->epoch;
+
+    my $end_date = DateTime->new( year => $end_yyyy, month => $end_mo, day => $end_dd, hour => $end_hh, minute => $end_mm, second => 0, time_zone => "UTC");
+    $end_epoch = $end_date->epoch;
+
+    if (($start_yyyy < 2018) || ($start_yyyy > 2022)) {
+	print "Start time out of range \n";
+        exit;
+    }
+    
+    if (($start_mo < 1) || ($start_mo > 12)) {
+	print "Start time out of range \n";
+        exit;
+    }
+
+    if (($start_dd < 1) || ($start_dd > 31)) {
+	print "Start time out of range \n";
+        exit;
+    }
+    
+    if (($start_hh < 0) || ($start_hh > 23)) {
+	print "Start time out of range \n";
+        exit;
+    }
+    
+    if (($start_mm < 0) || ($start_mm > 59)) {
+	print "Start time out of range \n";
+        exit;
+    }
+    
+    if (($end_yyyy < 2018) || ($end_yyyy > 2022)) {
+	print "End time out of range \n";
+        exit;
+    }
+
+    if (($end_mo < 1) || ($end_mo > 12)) {
+        print "End time out of range \n";
+        exit;
+    }
+
+    if (($end_dd < 1) || ($end_dd > 31)) {
+        print "End time out of range \n";
+        exit;
+    }
+    
+    if (($end_hh < 0) || ($end_hh > 23)) {
+        print "End time out of range \n";
+        exit;
+    }
+    
+    if (($end_mm < 0) || ($end_mm > 59)) {
+        print "End time out of range \n";
+        exit;
+    }
+
+    if ($start_ymd > $end_ymd) {
+        print "Start date must be before end date \n";
+        exit;
+    }
+    
+    if ($start_ymd == $end_ymd) {
+	if ($start_hh > $end_hh) {
+	    print "Start date must be before end date \n";
+	    exit;
+	}
+	if ($start_hh == $end_hh) {
+	    if ($start_mm > $end_mm) {
+		print "Start date must be before end date \n";
+		exit;
+	    }
+	    if ($start_mm == $end_mm) {
+		print "Start date must be before end date \n";
+		exit;
+            }
+	}
+    }
+    else {
+	if ($end_ymd != $start_ymd) {
+	    if ($start_mo == $end_mo) {
+		if (($end_ymd < $start_ymd) > 1){
+		    print "Requested dataset too long\n";
+		    exit;
+		}
+	    }
+	    else {
+		if ($start_yyyy != $end_yyyy) {
+		    print "Requested dataset too long\n";
+		    exit;
+		}
+		else {
+		    if (($end_mo - $start_mo) > 1) {
+			print "Requested dataset too long\n";
+			exit;
+		    }
+		    else {
+			my $tmpdd = $end_dd;
+			$tmpdd =~ s/^0//;
+			if (($tmpdd != 1) || ($start_dd < 28)) {
+			    print "Requested dataset too long\n";
+			    exit;
+			}
+		    }
+		}
+	    }
+	}
+    }
+    if (!-d "$DATA_LOCATION/$start_ymd") {
+	print "Sorry, data not available\n";
+	exit;
+    }
+}
