@@ -14,7 +14,7 @@ use warnings;
 use POSIX qw(setsid);
 use Scalar::Util qw(looks_like_number);
 use File::Path;
-#use File::Copy;
+use File::Copy;
 use DateTime;
 #use PDL;
 use GD::Graph;
@@ -101,68 +101,83 @@ sub extract_accum_and_time {
 
 sub graph_data {
     #make a plot
-    my $plottitle = "SE HoldPad Disdrometer Rainfall from " . $times[0] . " to " . $times[-1];
-    my $graph = GD::Graph::lines->new(1000,500);
+    my $plottitle = "SE HoldPad Rainfall Timeseries";
+    my $graph = GD::Graph::lines->new(1500,750);
 
     $graph->set(
-	x_label            => 'Time',
-	y_label            => 'Inches',
-	title              => $plottitle,
-	y_max_value        => 5,
-	#y_tick_number      => 7,
-	y_long_ticks       => 1,
-	y_all_ticks        => 1,
-	#y_min_value        => -3,
-	t_margin           => 10,
-	b_margin           => 10,
-	x_label_skip       => 5,
-	x_labels_vertical  => 1,
-	x_label_position   => 1/2,
-	transparent        => 0,
-	legend_placement   => 'RC',
-	dclrs              => ['#4d7296'],
-	borderclrs         => [undef],
-	boxclr             => "white",
-	bgclr              => "#fffd48",
-	fgclr              => '#bbbbbb',
-	axislabelclr       => '#333333',
-	labelclr           => '#333333',
-	textclr            => '#333333',
-	legendclr          => '#333333',
-	line_width         => 2
-	#bgclr              => "white",
-	#box_axis            => 0,
-	#bargroup_spacing   => 2
+	x_label             => 'Time',
+	y_label             => 'Inches',
+	title               => $plottitle,
+	y_max_value         => int($totals[-1] + 1),
+	y_tick_number       => 10*int($totals[-1] + 1),
+	y_long_ticks        => 1,
+	y_min_value         => 0,
+	t_margin            => 10,
+	b_margin            => 10,
+	r_margin            => 10,
+	l_margin            => 10,
+	x_label_skip        => 15,
+	x_label_position    => 1/2,
+	x_labels_vertical   => 1,
+	legend_placement    => 'RC',
+	borderclrs          => [undef],
+	boxclr              => "white",
+	bgclr               => "#fffd48",
+	fgclr               => '#bbbbbb',
+	axislabelclr        => '#333333',
+	labelclr            => '#333333',
+	textclr             => '#333333',
+	legendclr           => '#333333',
+	y_all_ticks         => 1,
+	transparent         => 0,
+	line_width          => 2
 	);
 
-    my @series = ("Rainfall Accumulation");
+    my @series = ("Rainfall");
 
+    
     #set the fonts
     #my $fontloc = "/usr/share/fonts/truetype/freefont/FreeSans.ttf";
-    my $fontloc = '/fonts/arial.ttf';
+    #my $font = "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf";
+    my $fontloc = '/usr/share/fonts/truetype/freefont/FreeSans.ttf';
     $graph->set_title_font($fontloc, 16);
     $graph->set_x_label_font($fontloc, 12);
     $graph->set_y_label_font($fontloc, 12);
-    $graph->set_legend_font($fontloc, 10);
     $graph->set_x_axis_font($fontloc, 10);
     $graph->set_y_axis_font($fontloc, 10);
-
+    $graph->set_legend_font($fontloc, 10);
+    
     #set the legend
     $graph->set_legend ( @series );
 
+    #format the time
+    my @formatted_times;
+    for my $thistime(@times) {
+	my $hh_1 = substr($thistime, -6, 2);
+	my $mm_1 = substr($thistime, -4, 2);
+	my $yyyy_1 = substr($thistime, 0, 4);
+	my $mo_1 = substr($thistime, 4, 2);
+	my $dd_1 = substr($thistime, 6, 2);
+	my $formatted_time = $mo_1 . "/" . $dd_1 . "/" . $yyyy_1 . " " . $hh_1 . ":" . $mm_1;
+	push(@formatted_times, $formatted_time);
+    }
+    
     #set the data
     my @dataset = (
-	[ @times ],
+	[ @formatted_times ],
 	[ @totals ]
 	);
-
+    
     #make the plot
     my $pngname = "disdrometer_rainfall_" . $times[0] . "_" . $times[-1] . ".png";
-    my $plotfile = $OUTPUT_DIR . "/" . $pngname;
+    my $plotfile = $OUTPUT_DIR . $pngname;
     my $gd = $graph->plot(\@dataset) or die $graph->error;
     open(IMG, '>', $plotfile) or die $!;
     binmode IMG;
     print IMG $gd->png;
+    my $link_gen = "ln -s -f " . $plotfile . " /var/www/html/disdrometer/latestDisdrometer.png";
+    system($link_gen);
+
 }
 
 sub create_file_list {
