@@ -94,8 +94,9 @@ sub extract_accum_and_time {
     }
     my @valspl = split(':', $line);
     my $accumval = $valspl[1];
-    push @accums, $accumval;
-    $total = $total + $accumval;
+    my $accumval_inches = $accumval * .03937; #convert mm to inches
+    push @accums, $accumval_inches;
+    $total = $total + $accumval_inches;
     push @totals, $total;
 }
 
