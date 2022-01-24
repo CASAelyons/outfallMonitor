@@ -94,7 +94,7 @@ sub extract_accum_and_time {
     }
     my @valspl = split(':', $line);
     my $accumval = $valspl[1];
-    my $accumval_inches = $accumval * .03937; #convert mm to inches
+    my $accumval_inches = ($accumval * .03937) / 60; #convert mm/hr to inches
     push @accums, $accumval_inches;
     $total = $total + $accumval_inches;
     push @totals, $total;
