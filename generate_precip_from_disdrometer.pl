@@ -102,13 +102,17 @@ sub extract_accum_and_time {
 
 sub graph_data {
     #make a plot
-    my $plottitle = "SE HoldPad Rainfall Timeseries";
+    my $total_abbrev = sprintf("%.3f", $totals[-1]);
+    my $plottitle = "SE HoldPad Rainfall Timeseries  (total = " . $total_abbrev . " in)";
+    #my $subtitle = "Total accumulation: " . $totals[-1] . " in\n";
     my $graph = GD::Graph::lines->new(1500,750);
 
     $graph->set(
 	x_label             => 'Time',
 	y_label             => 'Inches',
 	title               => $plottitle,
+	text_space          => 15,
+	#subtitle            => $subtitle,
 	y_max_value         => int($totals[-1] + 1),
 	y_tick_number       => 10*int($totals[-1] + 1),
 	y_long_ticks        => 1,
